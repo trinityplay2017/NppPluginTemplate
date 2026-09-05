@@ -3,7 +3,7 @@
 //#include "stdafx.h"
 #include "MHFileEx.h"
 
-
+CMHFileEx cMHFile;
 
 CMHFileEx::CMHFileEx()
 {

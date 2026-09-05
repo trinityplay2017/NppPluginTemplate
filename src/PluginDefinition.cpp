@@ -7,11 +7,14 @@
 #include <string>
 FuncItem funcItem[nbFunc];
 NppData nppData;
+extern void RemoveNppHook();
 void pluginInit(HANDLE )
 {
 }
+
 void pluginCleanUp()
 {
+    RemoveNppHook();
 }
 void commandMenuInit()
 {
@@ -142,20 +145,41 @@ static void collectTxtFiles(const std::wstring& folder, std::vector<std::wstring
 #include <filesystem>
 #include <string>
 #include <vector>
-static bool loadFileAsCharBuffer(const std::wstring& filePath, std::vector<char>& buffer)
+static bool loadFileAsCharBuffer(
+    const std::wstring& filePath,
+    std::vector<char>& buffer,
+    std::string& fullFileName)
 {
     std::filesystem::path path(filePath);
     std::string strPath = path.string();
-    CMHFileEx cMHFile;
+
+  
+
     if (!cMHFile.OpenBin(strPath.c_str()))
         return false;
+
     char* pData = cMHFile.GetData();
-    if (pData == nullptr)
+    char* pFullFileName = cMHFile.GetFullFileName();
+   
+
+    if (pData == nullptr || pFullFileName == nullptr)
         return false;
+
     size_t dataSize = strlen(pData);
+
     buffer.resize(dataSize + 1);
-    memcpy(buffer.data(), pData, dataSize);
+
+    memcpy(
+        buffer.data(),
+        pData,
+        dataSize);
+
     buffer[dataSize] = '\0';
+
+    fullFileName.assign(
+        pFullFileName,
+        strlen(pFullFileName));
+
     return true;
 }
 int RefreshT()
@@ -187,7 +211,247 @@ int RefreshT()
     }
     return 0;
 }
+extern HWND GetCurrentScintilla();
+#define NPPM_INTERNAL_STOPMONITORING (WM_USER + 49)
 void loadTxtFilesFromFolder()
+{
+    CStringW folder;
+
+    if (!SelectFolder(
+        nppData._nppHandle,
+        folder,
+        L"*.*"))
+    {
+        return;
+    }
+
+    std::vector<std::wstring> files;
+
+    collectTxtFiles(
+        folder.GetString(),
+        files);
+
+    for (const std::wstring& file : files)
+    {
+        std::vector<char> buffer;
+        std::string fullFileName;
+
+        if (!loadFileAsCharBuffer(
+            file,
+            buffer,
+            fullFileName))
+        {
+            continue;
+        }
+
+        //
+        // Let Notepad++ create a normal file buffer.
+        //
+        ::SendMessageW(
+            nppData._nppHandle,
+            NPPM_DOOPEN,
+            0,
+            reinterpret_cast<LPARAM>(file.c_str()));
+
+        LRESULT bufferID =
+            ::SendMessage(
+                nppData._nppHandle,
+                NPPM_GETCURRENTBUFFERID,
+                0,
+                0);
+        if (bufferID)
+        {
+            ::SendMessage(
+                nppData._nppHandle,
+                NPPM_INTERNAL_STOPMONITORING,
+                static_cast<WPARAM>(bufferID),
+                0);
+        }
+        //
+        // Get the newly opened document.
+        //
+        HWND curScintilla = GetCurrentScintilla();
+
+        if (!curScintilla)
+            continue;
+
+        //
+        // Replace the contents with CMHFileEx data.
+        //
+        ::SendMessageA(
+            curScintilla,
+            SCI_SETTEXT,
+            0,
+            reinterpret_cast<LPARAM>(buffer.data()));
+
+        //
+        // Make the document appear unmodified.
+        //
+        ::SendMessage(
+            curScintilla,
+            SCI_SETSAVEPOINT,
+            0,
+            0);
+
+
+       
+
+        RefreshT();
+    }
+}
+void loadTxtFilesFromFolderBUG()
+{
+    CStringW folder;
+    if (!SelectFolder(
+        nppData._nppHandle,
+        folder,
+        L"*.*"))
+    {
+        return;
+    }
+    std::vector<std::wstring> files;
+    collectTxtFiles(
+        folder.GetString(),
+        files);
+    if (files.empty())
+    {
+        ::MessageBoxW(
+            nppData._nppHandle,
+            L"No supported files were found in the selected folder.",
+            L"Load Files",
+            MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    for (const std::wstring& file : files)
+    {
+        std::vector<char> buffer;
+        std::string fullFileName;
+        if (!loadFileAsCharBuffer(file, buffer, fullFileName))
+            continue;
+        ::SendMessage(
+            nppData._nppHandle,
+            NPPM_MENUCOMMAND,
+            0,
+            IDM_FILE_NEW);
+        HWND curScintilla = GetCurrentScintilla();
+        if (!curScintilla)
+            continue;
+        ::SendMessageA(
+            curScintilla,
+            SCI_SETTEXT,
+            0,
+            reinterpret_cast<LPARAM>(buffer.data()));
+        LRESULT bufferID =
+            ::SendMessage(
+                nppData._nppHandle,
+                NPPM_GETCURRENTBUFFERID,
+                0,
+                0);
+        std::filesystem::path path(file);
+        std::wstring fileName = path.filename().wstring();
+
+        //MessageBoxA(nullptr, fullFileName.c_str(), "", MB_OK); // correct string
+       /* int wideSize = MultiByteToWideChar(CP_UTF8, 0, fullFileName.c_str(), -1, NULL, 0);
+        if (wideSize > 0)
+        {
+            std::vector<wchar_t> wideBuffer(wideSize);
+            MultiByteToWideChar(CP_UTF8, 0, fullFileName.c_str(), -1, wideBuffer.data(), wideSize);
+            ::SendMessageW(
+                nppData._nppHandle,
+                NPPM_SETUNTITLEDNAME,
+                static_cast<WPARAM>(bufferID),
+                reinterpret_cast<LPARAM>(wideBuffer.data()));
+        }*/
+        ::SendMessageW(
+            nppData._nppHandle,
+            NPPM_SETUNTITLEDNAME,
+            static_cast<WPARAM>(bufferID),
+            reinterpret_cast<LPARAM>(L"D:\\DEV_Z\\cplusplus\\plugintemplate-master\\bin64\\copy.bat"));
+        ::SendMessage(
+            curScintilla,
+            SCI_SETSAVEPOINT,
+            0,
+            0);
+        RefreshT();
+    }
+}
+void loadTxtFilesFromFolder2()
+{
+    CStringW folder;
+
+    if (!SelectFolder(
+        nppData._nppHandle,
+        folder,
+        L"*.*"))
+    {
+        return;
+    }
+
+    std::vector<std::wstring> files;
+
+    collectTxtFiles(
+        folder.GetString(),
+        files);
+
+    if (files.empty())
+    {
+        ::MessageBoxW(
+            nppData._nppHandle,
+            L"No supported files were found in the selected folder.",
+            L"Load Files",
+            MB_OK | MB_ICONINFORMATION);
+
+        return;
+    }
+
+    for (const std::wstring& file : files)
+    {
+        std::vector<char> buffer;
+
+      //  if (!loadFileAsCharBuffer(file, buffer))
+      //      continue;
+
+        /*
+            Create a completely new empty document.
+            This does NOT read the physical file.
+        */
+        ::SendMessage(
+            nppData._nppHandle,
+            NPPM_MENUCOMMAND,
+            0,
+            IDM_FILE_NEW);
+
+        /*
+            Get the newly created active Scintilla.
+        */
+        HWND curScintilla = GetCurrentScintilla();
+
+        if (!curScintilla)
+            continue;
+
+        /*
+            Insert the data loaded by MHFileEx.
+        */
+        ::SendMessageA(
+            curScintilla,
+            SCI_SETTEXT,
+            0,
+            reinterpret_cast<LPARAM>(buffer.data()));
+
+        /*
+            The document was loaded from disk and has not
+            been modified by the user.
+        */
+        ::SendMessage(
+            curScintilla,
+            SCI_SETSAVEPOINT,
+            0,
+            0);
+
+        RefreshT();
+    }
+}
+void loadTxtFilesFromFolderBAK()
 {
     CStringW folder;
     SelectFolder(NULL, folder, L"*.*");
@@ -208,14 +472,21 @@ void loadTxtFilesFromFolder()
     for (const std::wstring& file : files)
     {
         std::vector<char> buffer;
-        if (!loadFileAsCharBuffer(file, buffer))
-            continue;
+     //   if (!loadFileAsCharBuffer(file, buffer))
+     //       continue;
         ::SendMessageW(nppData._nppHandle, NPPM_DOOPEN, 0, (LPARAM)file.c_str());
         ::SendMessageA(
             curScintilla,
             SCI_SETTEXT,
             0,
             reinterpret_cast<LPARAM>(buffer.data()));
+
+        ::SendMessage(
+            curScintilla,
+            SCI_SETSAVEPOINT,
+            0,
+            0);
+
         RefreshT();
     }
     if (files.empty())

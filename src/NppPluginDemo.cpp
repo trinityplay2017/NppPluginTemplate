@@ -16,10 +16,15 @@
 //Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 #include "PluginDefinition.h"
-
+static WNDPROC g_originalNppWndProc = nullptr;
+static HWND g_hNppWnd = nullptr;
 extern FuncItem funcItem[nbFunc];
 extern NppData nppData;
-
+LRESULT CALLBACK NppWndProc(
+	HWND hwnd,
+	UINT msg,
+	WPARAM wParam,
+	LPARAM lParam);
 
 BOOL APIENTRY DllMain(HANDLE hModule, DWORD  reasonForCall, LPVOID /*lpReserved*/)
 {
@@ -46,12 +51,162 @@ BOOL APIENTRY DllMain(HANDLE hModule, DWORD  reasonForCall, LPVOID /*lpReserved*
 
     return TRUE;
 }
+#include "menuCmdID.h"
+HWND GetCurrentScintilla()
+{
+	int which = -1;
 
+	::SendMessage(
+		nppData._nppHandle,
+		NPPM_GETCURRENTSCINTILLA,
+		0,
+		reinterpret_cast<LPARAM>(&which));
+
+	if (which == 0)
+		return nppData._scintillaMainHandle;
+
+	if (which == 1)
+		return nppData._scintillaSecondHandle;
+
+	return nullptr;
+}
+#include <filesystem>
+std::wstring GetCurrentFileName()
+{
+	wchar_t buffer[MAX_PATH] = {};
+
+	::SendMessageW(
+		nppData._nppHandle,
+		NPPM_GETFULLCURRENTPATH,
+		MAX_PATH,
+		reinterpret_cast<LPARAM>(buffer));
+
+	return std::wstring(buffer);
+}
+#include "MHFileEx.h"
+bool SaveCurrentDocumentUsingMHFileEx()
+{
+	HWND hwndSci = GetCurrentScintilla();
+
+	if (!hwndSci)
+		return false;
+
+	std::wstring fileName = GetCurrentFileName();
+
+	if (fileName.empty())
+		return false;
+
+	LRESULT length =
+		::SendMessage(
+			hwndSci,
+			SCI_GETTEXTLENGTH,
+			0,
+			0);
+
+	if (length < 0)
+		return false;
+
+	std::vector<char> buffer(
+		static_cast<size_t>(length) + 1);
+
+	::SendMessageA(
+		hwndSci,
+		SCI_GETTEXT,
+		static_cast<WPARAM>(length) + 1,
+		reinterpret_cast<LPARAM>(buffer.data()));
+
+	buffer[length] = '\0';
+
+	/*
+		MHFileEx expects char*.
+	*/
+
+	//CMHFileEx file;
+
+	cMHFile.SetData(buffer.data());
+
+	std::string ansiPath =
+		std::filesystem::path(fileName).string();
+
+	if (!cMHFile.SaveToBin(ansiPath.c_str()))
+		return false;
+
+	::SendMessage(
+		hwndSci,
+		SCI_SETSAVEPOINT,
+		0,
+		0);
+
+	return true;
+}
+LRESULT CALLBACK NppWndProc(
+	HWND hwnd,
+	UINT msg,
+	WPARAM wParam,
+	LPARAM lParam)
+{
+	if (msg == WM_COMMAND)
+	{
+		if (LOWORD(wParam) == IDM_FILE_SAVE)
+		{
+		//	MessageBox(nullptr, L"test", L"", MB_OK);
+		//	return 0;
+			if (SaveCurrentDocumentUsingMHFileEx())
+				return 0;
+		}
+	}
+
+	return ::CallWindowProcW(
+		g_originalNppWndProc,
+		hwnd,
+		msg,
+		wParam,
+		lParam);
+}
+void RemoveNppHook()
+{
+	if (!g_hNppWnd || !g_originalNppWndProc)
+		return;
+
+	::SetWindowLongPtrW(
+		g_hNppWnd,
+		GWLP_WNDPROC,
+		reinterpret_cast<LONG_PTR>(g_originalNppWndProc));
+
+	g_originalNppWndProc = nullptr;
+	g_hNppWnd = nullptr;
+}
+bool InstallNppHook()
+{
+	if (!nppData._nppHandle)
+		return false;
+
+	if (g_originalNppWndProc)
+		return true;
+
+	g_hNppWnd = nppData._nppHandle;
+
+	g_originalNppWndProc =
+		reinterpret_cast<WNDPROC>(
+			::SetWindowLongPtrW(
+				g_hNppWnd,
+				GWLP_WNDPROC,
+				reinterpret_cast<LONG_PTR>(NppWndProc)));
+
+	if (!g_originalNppWndProc)
+	{
+		g_hNppWnd = nullptr;
+		return false;
+	}
+
+	return true;
+}
 
 extern "C" __declspec(dllexport) void setInfo(NppData notpadPlusData)
 {
 	nppData = notpadPlusData;
 	commandMenuInit();
+	InstallNppHook();
 }
 
 extern "C" __declspec(dllexport) const TCHAR * getName()

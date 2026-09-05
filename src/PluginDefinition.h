@@ -19,6 +19,7 @@
 #define PLUGINDEFINITION_H
 
 #include "PluginInterface.h"
+#include "MHFileEx.h"
 
 const TCHAR NPP_PLUGIN_NAME[] = TEXT("Jack Test");
 

@@ -38,7 +38,7 @@ void pluginCleanUp()
 void commandMenuInit()
 {
     setCommand(0, TEXT("Hello Notepad++"), hello, NULL, false);
-    setCommand(1, TEXT("Hello (with dialog)"), helloDlg, NULL, false);
+    setCommand(1, TEXT("Hello (with dialog) test"), helloDlg, NULL, false);
     setCommand(2, TEXT("Load TXT Files from Folder..."), loadTxtFilesFromFolder, NULL, false);
 }
 
@@ -80,8 +80,11 @@ void helloDlg()
 {
     ::MessageBox(NULL, TEXT("Hello, Notepad++!"), TEXT("Notepad++ Plugin Template"), MB_OK);
 }
-
-static std::wstring selectFolder()
+#include <shobjidl.h>
+#include <atlbase.h>
+#include <fstream>
+#include <vector>
+static std::wstring selectFolderBAK()
 {
     BROWSEINFOW bi = {};
     bi.hwndOwner = nppData._nppHandle;
@@ -102,6 +105,58 @@ static std::wstring selectFolder()
 
     return result;
 }
+#include <atlstr.h>
+void SetInitialFolder(IUnknown* dialog, const std::wstring& initialFolder)
+{
+    if (!initialFolder.empty())
+        return;
+
+    CComPtr<IShellItem> psiFolder;
+    const wchar_t* buff = initialFolder.c_str();
+    if (SUCCEEDED(SHCreateItemFromParsingName(buff, nullptr, IID_PPV_ARGS(&psiFolder))))
+    {
+        CComPtr<IFileDialog> pFileDialog;
+        if (SUCCEEDED(dialog->QueryInterface(&pFileDialog)))
+        {
+            pFileDialog->SetFolder(psiFolder);
+        }
+    }
+}
+BOOL GetSingleResult(IFileDialog* dlg, CStringW& outPath)
+{
+    CComPtr<IShellItem> item;
+    if (FAILED(dlg->GetResult(&item)))
+        return FALSE;
+
+    PWSTR psz = nullptr;
+    if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &psz)))
+        return FALSE;
+
+    outPath = psz;
+    CoTaskMemFree(psz);
+    return TRUE;
+}
+BOOL SelectFolder(HWND hParent, CStringW& outPath, const wchar_t* initialFolder)
+{
+    CComPtr<IFileOpenDialog> dlg;
+    if (FAILED(dlg.CoCreateInstance(__uuidof(FileOpenDialog))))
+        return FALSE;
+
+    DWORD opts = 0;
+    if (FAILED(dlg->GetOptions(&opts)))
+        return FALSE;
+
+    opts |= FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM;
+    dlg->SetOptions(opts);
+
+    SetInitialFolder(dlg, initialFolder);
+
+    if (FAILED(dlg->Show(hParent)))
+        return FALSE;
+
+    return GetSingleResult(dlg, outPath);
+}
+
 
 static void collectTxtFiles(const std::wstring& folder, std::vector<std::wstring>& files)
 {
@@ -149,15 +204,100 @@ static void collectTxtFiles(const std::wstring& folder, std::vector<std::wstring
         ::FindClose(hFind);
     }
 }
+static bool loadFileAsCharBuffer(const std::wstring& filePath, std::vector<char>& buffer)
+{
+    std::ifstream file(filePath, std::ios::binary | std::ios::ate);
 
+    if (!file)
+        return false;
+
+    std::streamsize size = file.tellg();
+
+    if (size < 0)
+        return false;
+
+    file.seekg(0, std::ios::beg);
+
+    buffer.resize(static_cast<size_t>(size) + 1);
+
+    if (size > 0)
+    {
+        if (!file.read(buffer.data(), size))
+            return false;
+    }
+
+    buffer[static_cast<size_t>(size)] = '\0';
+
+    return true;
+}
 void loadTxtFilesFromFolder()
 {
-    std::wstring folder = selectFolder();
-    if (folder.empty())
+   // CStringW folder;
+
+    /*if (!SelectFolder(
+        nppData._nppHandle,
+        std::wstring(),
+        folder))
+    {
+        return;
+    }*/
+    CStringW folder;
+    SelectFolder(NULL, folder, L"*.*");
+
+    std::vector<std::wstring> files;
+    collectTxtFiles(folder.GetString(), files);
+
+    int which = -1;
+
+    ::SendMessage(
+        nppData._nppHandle,
+        NPPM_GETCURRENTSCINTILLA,
+        0,
+        reinterpret_cast<LPARAM>(&which));
+
+    if (which == -1)
+        return;
+
+    HWND curScintilla =
+        (which == 0)
+        ? nppData._scintillaMainHandle
+        : nppData._scintillaSecondHandle;
+
+    for (const std::wstring& file : files)
+    {
+        std::vector<char> buffer;
+
+        if (!loadFileAsCharBuffer(file, buffer))
+            continue;
+
+        ::SendMessageW(nppData._nppHandle, NPPM_DOOPEN, 0, (LPARAM)file.c_str());
+
+        ::SendMessageA(
+            curScintilla,
+            SCI_SETTEXT,
+            0,
+            reinterpret_cast<LPARAM>(buffer.data()));
+    }
+
+    if (files.empty())
+    {
+        ::MessageBoxW(
+            nppData._nppHandle,
+            L"No .txt files were found in the selected folder.",
+            L"Load TXT Files",
+            MB_OK | MB_ICONINFORMATION);
+    }
+}
+void loadTxtFilesFromFolderBAK()
+{
+    CStringW folder;
+    SelectFolder(NULL, folder, L"*.*");
+    
+    if (folder.IsEmpty())
         return;
 
     std::vector<std::wstring> files;
-    collectTxtFiles(folder, files);
+    collectTxtFiles(folder.GetString(), files);
 
     for (const std::wstring& file : files)
         ::SendMessageW(nppData._nppHandle, NPPM_DOOPEN, 0, (LPARAM)file.c_str());

@@ -20,7 +20,7 @@
 
 #include "PluginInterface.h"
 
-const TCHAR NPP_PLUGIN_NAME[] = TEXT("Notepad++ plugin template");
+const TCHAR NPP_PLUGIN_NAME[] = TEXT("Jack Test");
 
 const int nbFunc = 3;
 

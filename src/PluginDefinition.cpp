@@ -18,63 +18,34 @@
 #include "PluginDefinition.h"
 #include "menuCmdID.h"
 
-//
-// The plugin data that Notepad++ needs
-//
-FuncItem funcItem[nbFunc];
+#include <windows.h>
+#include <shlobj.h>
+#include <vector>
+#include <string>
 
-//
-// The data of Notepad++ that you can use in your plugin commands
-//
+FuncItem funcItem[nbFunc];
 NppData nppData;
 
-//
-// Initialize your plugin data here
-// It will be called while plugin loading   
 void pluginInit(HANDLE /*hModule*/)
 {
 }
 
-//
-// Here you can do the clean up, save the parameters (if any) for the next session
-//
 void pluginCleanUp()
 {
 }
 
-//
-// Initialization of your plugin commands
-// You should fill your plugins commands here
 void commandMenuInit()
 {
-
-    //--------------------------------------------//
-    //-- STEP 3. CUSTOMIZE YOUR PLUGIN COMMANDS --//
-    //--------------------------------------------//
-    // with function :
-    // setCommand(int index,                      // zero based number to indicate the order of command
-    //            TCHAR *commandName,             // the command name that you want to see in plugin menu
-    //            PFUNCPLUGINCMD functionPointer, // the symbol of function (function pointer) associated with this command. The body should be defined below. See Step 4.
-    //            ShortcutKey *shortcut,          // optional. Define a shortcut to trigger this command
-    //            bool check0nInit                // optional. Make this menu item be checked visually
-    //            );
     setCommand(0, TEXT("Hello Notepad++"), hello, NULL, false);
     setCommand(1, TEXT("Hello (with dialog)"), helloDlg, NULL, false);
+    setCommand(2, TEXT("Load TXT Files from Folder..."), loadTxtFilesFromFolder, NULL, false);
 }
 
-//
-// Here you can do the clean up (especially for the shortcut)
-//
 void commandMenuCleanUp()
 {
-	// Don't forget to deallocate your shortcut here
 }
 
-
-//
-// This function help you to initialize your plugin commands
-//
-bool setCommand(size_t index, TCHAR *cmdName, PFUNCPLUGINCMD pFunc, ShortcutKey *sk, bool check0nInit) 
+bool setCommand(size_t index, TCHAR *cmdName, PFUNCPLUGINCMD pFunc, ShortcutKey *sk, bool check0nInit)
 {
     if (index >= nbFunc)
         return false;
@@ -90,27 +61,112 @@ bool setCommand(size_t index, TCHAR *cmdName, PFUNCPLUGINCMD pFunc, ShortcutKey 
     return true;
 }
 
-//----------------------------------------------//
-//-- STEP 4. DEFINE YOUR ASSOCIATED FUNCTIONS --//
-//----------------------------------------------//
 void hello()
 {
-    // Open a new document
     ::SendMessage(nppData._nppHandle, NPPM_MENUCOMMAND, 0, IDM_FILE_NEW);
 
-    // Get the current scintilla
     int which = -1;
     ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTSCINTILLA, 0, (LPARAM)&which);
     if (which == -1)
         return;
-    HWND curScintilla = (which == 0)?nppData._scintillaMainHandle:nppData._scintillaSecondHandle;
 
-    // Say hello now :
-    // Scintilla control has no Unicode mode, so we use (char *) here
+    HWND curScintilla = (which == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
+
     ::SendMessage(curScintilla, SCI_SETTEXT, 0, (LPARAM)"Hello, Notepad++!");
 }
 
 void helloDlg()
 {
     ::MessageBox(NULL, TEXT("Hello, Notepad++!"), TEXT("Notepad++ Plugin Template"), MB_OK);
+}
+
+static std::wstring selectFolder()
+{
+    BROWSEINFOW bi = {};
+    bi.hwndOwner = nppData._nppHandle;
+    bi.lpszTitle = L"Select a folder containing TXT files";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+
+    PIDLIST_ABSOLUTE pidl = ::SHBrowseForFolderW(&bi);
+    if (!pidl)
+        return std::wstring();
+
+    wchar_t path[MAX_PATH] = {};
+    std::wstring result;
+
+    if (::SHGetPathFromIDListW(pidl, path))
+        result = path;
+
+    ::CoTaskMemFree(pidl);
+
+    return result;
+}
+
+static void collectTxtFiles(const std::wstring& folder, std::vector<std::wstring>& files)
+{
+    std::vector<std::wstring> folders;
+    folders.push_back(folder);
+
+    while (!folders.empty())
+    {
+        std::wstring current = folders.back();
+        folders.pop_back();
+
+        std::wstring pattern = current;
+        if (!pattern.empty() && pattern.back() != L'\\')
+            pattern += L'\\';
+        pattern += L'*';
+
+        WIN32_FIND_DATAW fd = {};
+        HANDLE hFind = ::FindFirstFileW(pattern.c_str(), &fd);
+        if (hFind == INVALID_HANDLE_VALUE)
+            continue;
+
+        do
+        {
+            if (!lstrcmpW(fd.cFileName, L".") || !lstrcmpW(fd.cFileName, L".."))
+                continue;
+
+            std::wstring fullPath = current;
+            if (!fullPath.empty() && fullPath.back() != L'\\')
+                fullPath += L'\\';
+            fullPath += fd.cFileName;
+
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            {
+                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                    folders.push_back(fullPath);
+                continue;
+            }
+
+            const wchar_t* extension = ::PathFindExtensionW(fd.cFileName);
+            if (extension && !lstrcmpiW(extension, L".txt"))
+                files.push_back(fullPath);
+        }
+        while (::FindNextFileW(hFind, &fd));
+
+        ::FindClose(hFind);
+    }
+}
+
+void loadTxtFilesFromFolder()
+{
+    std::wstring folder = selectFolder();
+    if (folder.empty())
+        return;
+
+    std::vector<std::wstring> files;
+    collectTxtFiles(folder, files);
+
+    for (const std::wstring& file : files)
+        ::SendMessageW(nppData._nppHandle, NPPM_DOOPEN, 0, (LPARAM)file.c_str());
+
+    if (files.empty())
+    {
+        ::MessageBoxW(
+            nppData._nppHandle,
+            L"No .txt files were found in the selected folder.",
+            L"Load TXT Files",
+            MB_OK | MB_ICONINFORMATION);
+    }
 }

@@ -20,6 +20,7 @@
 
 #include <windows.h>
 #include <shlobj.h>
+#include <shlwapi.h>
 #include <vector>
 #include <string>
 

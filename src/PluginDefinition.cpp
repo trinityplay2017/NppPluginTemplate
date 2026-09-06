@@ -98,7 +98,7 @@ BOOL SelectFolder(HWND hParent, CStringW& outPath, const wchar_t* initialFolder)
         return FALSE;
     return GetSingleResult(dlg, outPath);
 }
-static void collectTxtFiles(const std::wstring& folder, std::vector<std::wstring>& files)
+void collectTxtFiles(const std::wstring& folder, std::vector<std::wstring>& files)
 {
     std::vector<std::wstring> folders;
     folders.push_back(folder);
@@ -145,7 +145,7 @@ static void collectTxtFiles(const std::wstring& folder, std::vector<std::wstring
 #include <filesystem>
 #include <string>
 #include <vector>
-static bool loadFileAsCharBuffer(
+bool loadFileAsCharBuffer(
     const std::wstring& filePath,
     std::vector<char>& buffer,
     std::string& fullFileName)
@@ -212,7 +212,11 @@ int RefreshT()
     return 0;
 }
 extern HWND GetCurrentScintilla();
-#define NPPM_INTERNAL_STOPMONITORING (WM_USER + 49)
+//#define NPPM_INTERNAL_STOPMONITORING (WM_USER + 49)
+#define NOTEPADPLUS_USER_INTERNAL     (WM_USER + 0000)
+
+#define NPPM_INTERNAL_STOPMONITORING                (NOTEPADPLUS_USER_INTERNAL + 49)  // Used by Monitoring feature
+
 void loadTxtFilesFromFolder()
 {
     CStringW folder;
